@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+.links line {
+  stroke: #999;
+  stroke-opacity: 0.6;
+}
+.nodes circle {
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+</style>
+<svg width="960" height="600"></svg>
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script>
+var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height");
+var color = d3.scaleOrdinal(d3.schemeCategory20);
+var nodesGroup2 = [];
+var simulation = d3.forceSimulation()
+    .force("link", d3.forceLink().id(function(d) { return d.id; }))
+    .force("charge", d3.forceManyBody().strength(function(node) {
+      var nodeArray = [];
+      var earliestDate = 1000000000000000000000;
+      if (node.group == 2) {
+        for (var i = 0; i < nodesGroup2.length; i++) {
+          if (node.belongsTo == nodesGroup2[i].belongsTo) {
+            nodeArray.push(nodesGroup2[i])
+          }
+        }
+        var average = 0
+        for (var i = 0; i < nodeArray.length; i++) {
+          average = average + nodeArray[i].time
+          if ( nodeArray[i].time < earliestDate) {
+            earliestDate = nodeArray[i].time
+          }
+        }
+        var mean = average / nodeArray.length;
+
+        console.log(nodesGroup2);
+
+        if (mean - earliestDate <= 259200000) {
+          return -10;
+        } else if ( mean - earliestDate < 2628000000) {
+          return  (-(2 * mean) / 100000000)
+        } else if ( mean - earliestDate < 15770000000) {
+          return (-(3 * mean) / 1000000000)
+        } else if ( mean - earliestDate < 126100000000){
+          return (-(4 * mean) / 10000000000)
+        } else {
+          return (-(4 * mean) / 10000000000)
+        }
+
+        return -(Math.pow(mean / 100000000000, 2))
+
+      }
+      }))
+    .force("center", d3.forceCenter(width / 2, height / 2));
+d3.json("http://www.flukebook.org/api/jdoql?SELECT%20FROM%20org.ecocean.Encounter%20WHERE%20catalogNumber.startsWith(%27300%27)", function(error, data) {
+  if (error) throw error;
+  var prenodes = [];
+  for(i = 0; i < data.length; i++) {
+      var belongsTo;
+      if (data[i].individualID === undefined) {
+        belongsTo = "DNE";
+      } else {
+        belongsTo = data[i].individualID;
+      }
+    prenodes.push({"id" : data[i].catalogNumber, "belongsTo" : belongsTo, "time": data[i].dateInMilliseconds, "group": 2});
+      if (data[i].individualID) {
+        prenodes.push({"id" : data[i].individualID, "time": data[i].dateInMilliseconds, "group": 1});
+      }
+    }
+    for(i = 0; i < data.length; i++) {
+      for(j = 0; j < data[i].annotations.length; j++) {
+        prenodes.push({"id" : data[i].annotations[j].id, "belongsTo" : data[i].catalogNumber, "time": data[i].dateInMilliseconds, "group": 3});
+      }
+    }
+    for(a = 0; a < prenodes.length; a++) {
+      for(b = 0; b < prenodes.length; b++) {
+        if(prenodes[a] && prenodes[b]){
+          if (prenodes[a].id && prenodes[b].id){
+            if (prenodes[a] != prenodes[b] && prenodes[a].id == prenodes[b].id){
+              delete prenodes[b];
+            }
+          }
+        }
+      }
+    }
+  var nodes = [];
+  for (z = 0; z < prenodes.length; z++) {
+    if (prenodes[z] != undefined){
+      nodes.push(prenodes[z])
+    }
+  }
+  nodes.push({"id" : "0", "belongsTo" : "DNE", "group": 0});
+
+  for (var i = 0; i < nodes.length; i++) {
+    if ( nodes[i].group == 2 ) {
+      nodesGroup2.push(nodes[i]);
+    }
+  }
+
+  var links = [];
+  for (i = 0; i < nodes.length; i++) {
+    if (nodes[i]) {
+      if (nodes[i].group === 2) {
+        for (j = 0; j < nodes.length; j++) {
+          if (nodes[j]){
+            if (nodes[i].belongsTo === nodes[j].id) {
+              links.push({'source' : nodes[i].id, 'target' : nodes[j].id, "value" : 3})
+            } else if (nodes[i].belongsTo == "DNE" ){
+              links.push({'source' : nodes[i].id, 'target' : 0, 'value' : 5})
+            }
+          }
+        }
+      } else if (nodes[i].group === 3) {
+        for (k = 0; k < nodes.length; k++) {
+          if (nodes[k]){
+            if (nodes[i].belongsTo === nodes[k].id) {
+              links.push({'source' : nodes[i].id, 'target' : nodes[k].id, 'value' : 1})
+            }
+          }
+        }
+      } else if (nodes[i].group === 1) {
+          links.push({'source' : nodes[i].id, 'target' : 0, 'value' : 5})
+      }
+    }
+  }
+  var link = svg.append("g")
+      .attr("class", "links")
+    .selectAll("line")
+    .data(links)
+    .enter().append("line")
+      .attr("stroke-width", function(d) { return Math.sqrt(d.value); });
+  var node = svg.append("g")
+      .attr("class", "nodes")
+    .selectAll("circle")
+    .data(nodes)
+    .enter().append("circle")
+      .attr("r", 5)
+      .attr("fill", function(d) {
+          if (d != undefined){
+            return color(d.group);
+          }
+       })
+      .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended));
+  node.append("title")
+      .text(function(d) {
+        if ( d != undefined){
+          return d.id;
+        }
+      });
+  simulation
+      .nodes(nodes)
+      .on("tick", ticked);
+  simulation.force("link")
+      .links(links);
+  function ticked() {
+    link
+        .attr("x1", function(d) { return d.source.x; })
+        .attr("y1", function(d) { return d.source.y; })
+        .attr("x2", function(d) { return d.target.x; })
+        .attr("y2", function(d) { return d.target.y; });
+    node
+        .attr("cx", function(d) { return d.x; })
+        .attr("cy", function(d) { return d.y; });
+  }
+});
+function dragstarted(d) {
+  if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+}
+function dragged(d) {
+    d.fx = d3.event.x;
+    d.fy = d3.event.y;
+}
+function dragended(d) {
+  if (!d3.event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+}
+</script>
